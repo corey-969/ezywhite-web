@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ezywhite",
+      "runtimeExecutable": "python",
+      "runtimeArgs": ["-m", "http.server", "4173", "--directory", "C:/Users/ccurr/OneDrive/Desktop/Projects/EzyWhite"],
+      "port": 4173
+    }
+  ]
+}
