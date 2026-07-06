@@ -218,11 +218,19 @@
   <div class="cart-foot">
     <div class="cart-total"><span>Total</span><span class="script" id="cartTotal">£0</span></div>
     <p class="ship-note" id="shipNote">Add £40 for free UK shipping.</p>
-    <div id="paypal-box"></div>
-    <p class="pp-fallback" id="ppFallback">
-      Live PayPal checkout activates once you add your Client ID — replace
-      <code>PAYPAL_CLIENT_ID</code> in the page's <code>&lt;script&gt;</code> source.
-    </p>
+    <form class="checkout-form" id="checkoutForm" novalidate>
+      <p class="co-head">Your delivery details</p>
+      <input id="coName" type="text" placeholder="Full name" autocomplete="name" required />
+      <input id="coEmail" type="email" placeholder="Email address" autocomplete="email" required />
+      <input id="coPhone" type="tel" placeholder="Phone number" autocomplete="tel" required />
+      <input id="coAddr" type="text" placeholder="Delivery address" autocomplete="street-address" required />
+      <div class="co-row">
+        <input id="coCity" type="text" placeholder="Town / City" autocomplete="address-level2" required />
+        <input id="coZip" type="text" placeholder="Postcode" autocomplete="postal-code" required />
+      </div>
+      <button class="btn block" id="payBtn" type="submit">Pay with PayPal →</button>
+      <p class="co-note">🔒 You'll confirm and pay securely on PayPal. Your details are used only to ship your order.</p>
+    </form>
   </div>
 </aside>
 
@@ -258,8 +266,9 @@ const FAQS = [
    PAYPAL — set your real client id here to go live
    Get it at https://developer.paypal.com/dashboard (REST app).
    ============================================================ */
-const PAYPAL_CLIENT_ID = 'PAYPAL_CLIENT_ID'; // ← replace with your live/sandbox Client ID
+const PAYPAL_EMAIL = 'daniellermck@gmail.com'; // funds go to this PayPal account
 const CURRENCY = 'GBP';
+const PAYPAL_URL = 'https://www.paypal.com/cgi-bin/webscr';
 
 /* ============================================================
    RENDER PRODUCTS
@@ -342,7 +351,7 @@ function renderCart(){
   const t=totalAmount();
   cartTotalEl.textContent=fmt(t);
   shipNote.textContent = t>=40 ? '🎉 You\'ve unlocked free UK shipping!' : `Add ${fmt(40-t)} more for free UK shipping.`;
-  renderPayPal(t);
+  updateCheckout(t);
 }
 
 function addToCart(id){
@@ -369,52 +378,68 @@ overlay.addEventListener('click',closeCart);
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeCart();});
 
 /* ============================================================
-   PAYPAL BUTTONS (graceful fallback if no client id yet)
+   PAYPAL STANDARD CHECKOUT (funds → PAYPAL_EMAIL)
+   Buyer fills delivery details, then pays on PayPal. PayPal
+   also requires a shipping address, so the seller always gets
+   the buyer's name, email & address with the paid order.
    ============================================================ */
-let ppLoaded=false;
-const ppBox=document.getElementById('paypal-box');
-const ppFallback=document.getElementById('ppFallback');
+const payBtn=document.getElementById('payBtn');
+const checkoutForm=document.getElementById('checkoutForm');
 
-function loadPayPalSdk(){
-  return new Promise((res,rej)=>{
-    if(window.paypal)return res();
-    const s=document.createElement('script');
-    s.src=`https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(PAYPAL_CLIENT_ID)}&currency=${CURRENCY}`;
-    s.onload=res;s.onerror=rej;document.head.appendChild(s);
+function updateCheckout(total){
+  if(!payBtn)return;
+  payBtn.disabled = total<=0;
+  payBtn.style.opacity = total<=0 ? '.45' : '1';
+  payBtn.textContent = total<=0 ? 'Add a kit to check out' : ('Pay '+fmt(total)+' with PayPal →');
+}
+
+if(checkoutForm){
+  checkoutForm.addEventListener('submit',e=>{
+    e.preventDefault();
+    if(totalAmount()<=0) return;
+    if(!checkoutForm.checkValidity()){ checkoutForm.reportValidity(); return; }
+    const g=id=>document.getElementById(id).value.trim();
+    const full=g('coName'), parts=full.split(/\s+/), first=parts.shift()||full, last=parts.join(' ')||'-';
+    const f=document.createElement('form');
+    f.method='POST'; f.action=PAYPAL_URL;
+    const add=(n,v)=>{const i=document.createElement('input');i.type='hidden';i.name=n;i.value=v;f.appendChild(i);};
+    add('cmd','_cart'); add('upload','1');
+    add('business',PAYPAL_EMAIL);
+    add('currency_code',CURRENCY); add('lc','GB');
+    let n=1;
+    Object.entries(cart).forEach(([id,q])=>{const p=PRODUCTS.find(x=>x.id===id);
+      add('item_name_'+n, p.name+' — '+p.pct+'% whitening gel');
+      add('amount_'+n, p.price.toFixed(2));
+      add('quantity_'+n, String(q));
+      n++;
+    });
+    add('no_shipping','2');   // require a delivery address on PayPal
+    add('no_note','0');
+    add('first_name',first); add('last_name',last);
+    add('email',g('coEmail'));
+    add('night_phone_a',g('coPhone'));
+    add('address1',g('coAddr'));
+    add('city',g('coCity'));
+    add('zip',g('coZip'));
+    add('country','GB');
+    add('custom','Phone: '+g('coPhone')+' | Email: '+g('coEmail'));
+    add('return','https://ezywhite.co.uk/?paid=1');
+    add('cancel_return','https://ezywhite.co.uk/');
+    add('rm','1');
+    document.body.appendChild(f);
+    f.submit();
   });
 }
 
-function renderPayPal(total){
-  const live = PAYPAL_CLIENT_ID && PAYPAL_CLIENT_ID!=='PAYPAL_CLIENT_ID';
-  if(!live){
-    // demo mode: show a styled button + helper note
-    ppBox.innerHTML = `<button class="btn block" id="demoCheckout" ${total===0?'disabled style=opacity:.4':''}>Checkout with PayPal · ${fmt(total)}</button>`;
-    ppFallback.style.display='block';
-    const d=document.getElementById('demoCheckout');
-    if(d)d.addEventListener('click',()=>alert('Demo mode — add your PayPal Client ID in the page source to take live payments.\n\nOrder total: '+fmt(total)));
-    return;
-  }
-  ppFallback.style.display='none';
-  if(total===0){ppBox.innerHTML='<button class="btn block" disabled style="opacity:.4">Add a kit to check out</button>';return;}
-  loadPayPalSdk().then(()=>{
-    ppBox.innerHTML='';
-    paypal.Buttons({
-      style:{shape:'pill',color:'black',layout:'vertical',label:'paypal'},
-      createOrder:(d,actions)=>actions.order.create({
-        purchase_units:[{
-          amount:{value:totalAmount().toFixed(2),currency_code:CURRENCY,
-            breakdown:{item_total:{value:totalAmount().toFixed(2),currency_code:CURRENCY}}},
-          items:Object.entries(cart).map(([id,q])=>{const p=PRODUCTS.find(x=>x.id===id);
-            return {name:p.name+' ('+p.pct+'% gel)',quantity:String(q),
-              unit_amount:{value:p.price.toFixed(2),currency_code:CURRENCY}};})
-        }]
-      }),
-      onApprove:(d,actions)=>actions.order.capture().then(o=>{
-        cartItems.innerHTML='<div class="cart-empty">✅ Thank you, '+(o.payer?.name?.given_name||'friend')+'!<br>Your EzyWhite order is confirmed.</div>';
-        cart={};cartCount.textContent=0;cartTotalEl.textContent='£0';ppBox.innerHTML='';
-      })
-    }).render('#paypal-box');
-  }).catch(()=>{ppBox.innerHTML='<p class="pp-fallback">Couldn\'t load PayPal — check your Client ID.</p>';});
+/* thank-you when PayPal returns the buyer to ?paid=1 */
+if(new URLSearchParams(location.search).get('paid')==='1'){
+  cart={};
+  try{history.replaceState(null,'',location.pathname);}catch(_){}
+  setTimeout(()=>{
+    renderCart();
+    cartItems.innerHTML='<div class="cart-empty">✅ Thank you! Your EzyWhite order is confirmed.<br>A receipt is on its way to your email. 💛</div>';
+    openCart();
+  },300);
 }
 
 /* ============================================================
